@@ -1,0 +1,26 @@
+# Этап 1: установка зависимостей в отдельный каталог
+FROM python:3.13-slim-trixie AS build
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+WORKDIR /build
+COPY requirements.txt .
+RUN pip install --target=/packages -r requirements.txt
+
+# Этап 2: итоговый distroless-образ (без shell и пакетного менеджера)
+FROM gcr.io/distroless/python3-debian13
+WORKDIR /app
+ENV PYTHONPATH=/packages \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+COPY --from=build /packages /packages
+COPY app.py .
+
+# Непривилегированный пользователь, указан явно числом (UID)
+USER 10001
+
+EXPOSE 5000
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD ["/usr/bin/python3", "-c", "import urllib.request as u; u.urlopen('http://localhost:5000/health')"]
+
+ENTRYPOINT ["/usr/bin/python3", "-m", "gunicorn", "--bind", "0.0.0.0:5000", "--workers", "2", "--access-logfile", "-", "app:app"]
